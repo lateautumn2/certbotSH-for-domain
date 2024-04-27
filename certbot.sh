@@ -29,6 +29,9 @@ while true; do
         # 使用 Cloudflare DNS 插件申请泛域名证书
         if certbot certonly --dns-cloudflare --dns-cloudflare-credentials "$cloudflare_config_path" -d "$domain" -d "*.$domain"; then
             echo "成功! 已经获取到 $domain 和 *.$domain 的证书."
+
+             # 添加自动续签任务到 crontab
+            echo "0 0 * * * /usr/bin/certbot renew --quiet" | crontab -
         else
             echo "无法获取 $domain 的通配符证书。请检查您的域名设置并重试."
             exit 1
@@ -37,6 +40,9 @@ while true; do
         # 使用 Certbot 的 Standalone 插件申请二级域名证书
         if certbot certonly --standalone -d "$domain"; then
             echo "成功! 已经获取到 $domain 的证书."
+
+             # 添加自动续签任务到 crontab
+            echo "0 0 * * * /usr/bin/certbot renew --quiet" | crontab -
         else
             echo "无法获取 $domain 的二级域名证书。请检查您的域名设置并重试."
             exit 1
