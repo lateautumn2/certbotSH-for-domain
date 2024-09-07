@@ -2,6 +2,9 @@
 通过certbot申请域名证书
 ``` bash
 wget https://raw.githubusercontent.com/lateautumn2/certbotSH-for-domain/main/certbot.sh
+```
+
+``` bash
 chmod +x certbot.sh
 
 #签发证书
