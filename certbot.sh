@@ -100,38 +100,67 @@ ${sync_line}"
 # ---------- 函数：Cloudflare 配置 ----------
 setup_cloudflare_creds() {
     local config_path="/etc/letsencrypt/cloudflare.ini"
+    local cf_auth_type
+    local cf_token
+    local cf_email
+    local cf_key
+    local config_content
 
-    echo ""
-    echo "Cloudflare 认证方式:"
-    echo "  1) API Token（推荐，更安全的粒度权限）"
-    echo "  2) Global API Key（旧版，使用邮箱+密钥）"
-    read -p "请选择 (1-2): " cf_auth_type
+    # 从创建目录到写入凭据都使用仅所有者可读写的默认权限，避免凭据短暂暴露。
+    umask 077
+
+    # certbot 通常会创建 /etc/letsencrypt，但不能假设目录一定已经存在。
+    # 先创建目录，避免凭据文件写入失败后仍继续执行申请命令。
+    if ! mkdir -p "$(dirname "$config_path")"; then
+        echo "✗ 无法创建 Cloudflare 配置目录：$(dirname "$config_path")" >&2
+        return 1
+    fi
+
+    # 此函数通过命令替换返回配置文件路径：cf_config=$(setup_cloudflare_creds)。
+    # 因此交互内容必须写入 stderr，否则会与路径一起被捕获，最终传给 Certbot。
+    echo "" >&2
+    echo "Cloudflare 认证方式:" >&2
+    echo "  1) API Token（推荐，更安全的粒度权限）" >&2
+    echo "  2) Global API Key（旧版，使用邮箱+密钥）" >&2
+    read -r -p "请选择 (1-2): " cf_auth_type
 
     case "$cf_auth_type" in
         1)
-            read -p "Cloudflare API Token: " cf_token
-            cat > "$config_path" <<EOF
-dns_cloudflare_api_token = $cf_token
-EOF
+            read -r -s -p "Cloudflare API Token: " cf_token
+            echo >&2
+            [[ -n "$cf_token" ]] || {
+                echo "✗ API Token 不能为空" >&2
+                return 1
+            }
+            config_content="dns_cloudflare_api_token = $cf_token"
             ;;
         2)
-            read -p "Cloudflare Email: " cf_email
-            read -p "Cloudflare API Key: " cf_key
-            cat > "$config_path" <<EOF
-dns_cloudflare_email = $cf_email
-dns_cloudflare_api_key = $cf_key
-EOF
+            read -r -p "Cloudflare Email: " cf_email
+            read -r -s -p "Cloudflare API Key: " cf_key
+            echo >&2
+            [[ -n "$cf_email" && -n "$cf_key" ]] || {
+                echo "✗ Cloudflare Email 和 API Key 不能为空" >&2
+                return 1
+            }
+            config_content="dns_cloudflare_email = $cf_email
+dns_cloudflare_api_key = $cf_key"
             ;;
         *)
-            echo "✗ 无效选择，使用 API Token"
-            read -p "Cloudflare API Token: " cf_token
-            cat > "$config_path" <<EOF
-dns_cloudflare_api_token = $cf_token
-EOF
+            echo "✗ 无效选择，请输入 1 或 2" >&2
+            return 1
             ;;
     esac
 
-    chmod 600 "$config_path"
+    if ! printf '%s\n' "$config_content" > "$config_path"; then
+        echo "✗ 无法写入 Cloudflare 配置文件：$config_path" >&2
+        return 1
+    fi
+    if ! chmod 600 "$config_path"; then
+        echo "✗ 无法设置 Cloudflare 配置文件权限：$config_path" >&2
+        return 1
+    fi
+
+    # 仅将纯路径输出到 stdout，供命令替换安全取得。
     echo "$config_path"
 }
 
@@ -239,7 +268,10 @@ case "$auth_method" in
             echo "✗ 安装 Cloudflare 插件失败"
             exit 1
         }
-        cf_config=$(setup_cloudflare_creds)
+        if ! cf_config=$(setup_cloudflare_creds); then
+            echo "✗ Cloudflare 凭据配置失败"
+            exit 1
+        fi
         echo "⏳ 使用 Cloudflare DNS 方式申请 $domain ..."
         certbot certonly --dns-cloudflare \
             --dns-cloudflare-credentials "$cf_config" \
